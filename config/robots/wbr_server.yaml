@@ -1,0 +1,9 @@
+server_name: wbr
+model_path: ../../mjcf/scene.xml
+initial_keyframe: home
+max_ticks: 0
+tick_timeout_ms: 1000
+activation_timeout_ms: 5000
+allow_timed_out_adapter_replacement: true
+status_period_ms: 100
+headless: false

@@ -1,6 +1,8 @@
 <mujoco model="models">
   <compiler angle="radian" meshdir="./meshes"/>
 
+  <option timestep="0.001"/>
+
   <asset>
     <mesh name="base_link" content_type="model/stl" file="base_link.STL"/>
     <mesh name="llink1" content_type="model/stl" file="llink1.STL"/>

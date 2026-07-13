@@ -1,0 +1,37 @@
+schema_version: 1
+robot: wbr
+
+adapter:
+  server_name: wbr
+  controller_id: wbr_ctrl
+  timeout_ms: 5000
+  service_timeout_ms: 10000
+  max_ticks: 100
+  operator_input_max_age_ms: 200
+
+interfaces:
+  imu:
+    quaternion: imu_quat
+    angular_velocity: imu_gyro
+    linear_acceleration: imu_accel
+  motors:
+    - {semantic_name: left_joint_1, position_state: ljoint1_pos, velocity_state: ljoint1_vel, effort_state: ljoint1_tor, effort_command: ljoint1_actuator}
+    - {semantic_name: left_joint_4, position_state: ljoint4_pos, velocity_state: ljoint4_vel, effort_state: ljoint4_tor, effort_command: ljoint4_actuator}
+    - {semantic_name: left_wheel, position_state: lwheel_pos, velocity_state: lwheel_vel, effort_state: lwheel_tor, effort_command: lwheel_actuator}
+    - {semantic_name: right_joint_1, position_state: rjoint1_pos, velocity_state: rjoint1_vel, effort_state: rjoint1_tor, effort_command: rjoint1_actuator}
+    - {semantic_name: right_joint_4, position_state: rjoint4_pos, velocity_state: rjoint4_vel, effort_state: rjoint4_tor, effort_command: rjoint4_actuator}
+    - {semantic_name: right_wheel, position_state: rwheel_pos, velocity_state: rwheel_vel, effort_state: rwheel_tor, effort_command: rwheel_actuator}
+
+input_script:
+  - {begin_tick: 0, end_tick: 1}
+  - {begin_tick: 1, end_tick: 2, space: true}
+  - {begin_tick: 50, end_tick: 51, e: true}
+
+control:
+  decimation: 1
+  force_relax: false
+  motor_zero_rad: [-0.06, -0.20, 0, 0.06, 0.20, 0]
+
+logger:
+  hz: 0
+  stdout: off

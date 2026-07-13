@@ -1,8 +1,13 @@
 #pragma once
 
-#include "control/config.hpp"
-
+#include <array>
+#include <cstdint>
 #include <string>
+#include <vector>
+
+#include "control/imu_fusion.hpp"
+#include "controller/sim/config.hpp"
+#include "controller/sim/input_script.hpp"
 
 namespace controller
 {
@@ -16,11 +21,12 @@ struct logger_config
 struct app_config
 {
     std::string ipc_prefix = "wbr";
-    control::chassis_config chassis{};
+    sim::AdapterConfig adapter{};
+    sim::PipelineConfig pipeline{};
+    sim::InputScript input_script{};
     control::imu_sim_config imu_sim{};
-    control::imu_mode imu_mode = control::imu_mode::mahony;
-    float control_hz = 1000.0f;
     logger_config logger{};
+    std::uint64_t log_every_ticks = 0;
 };
 
 app_config load_config(int argc, char** argv);

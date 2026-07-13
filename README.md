@@ -1,14 +1,16 @@
 # wbr_mujoco
 
-WBR RoboMaster balance wheel-leg — controller + robot assets.  
-MuJoCo simulation server lives in the separate **[mujoco_interface](https://github.com/CosmosMount/mujoco_interface)** repo.
+WBR RoboMaster balance wheel-leg — controller adapter + robot assets.  
+MuJoCo simulation server lives in the sibling **[mujoco_sim_core](https://github.com/CosmosMount/mujoco_sim_core)** workspace (`mujoco-sim-server`).
 
 ## Repositories
 
-Clone both **side by side** (sibling directories):
+Clone side by side (sibling directories):
 
 ```bash
 git clone git@github.com:CosmosMount/wbr_mujoco.git
+git clone git@github.com:CosmosMount/mujoco_sim_core.git
+# eCAL runtime for adapter SDK (fetch script in mujoco_interface if needed)
 git clone git@github.com:CosmosMount/mujoco_interface.git
 ```
 
@@ -16,69 +18,83 @@ Expected layout:
 
 ```
 code/
-├── wbr_mujoco/          # this repo — controller, MJCF, wbr.yaml
-└── mujoco_interface/    # sim server + core + eCAL transport
+├── wbr_mujoco/          # this repo — controller adapter, MJCF, wbr.yaml
+├── mujoco_sim_core/     # sim server + adapter SDK + lockstep core
+└── mujoco_interface/    # vendored eCAL under third_party/ecal/usr
 ```
 
 ## Layout (wbr_mujoco)
 
 ```
-controller/          control core + ecal_io
-common/              in-proc msg bus
-config/robots/       wbr.yaml
+controller/          control core + sim adapter I/O
+config/robots/       wbr.yaml (adapter) + wbr_server.yaml (server)
 mjcf/                scene + meshes
-tests/               test_import
+tests/               test_import (MJCF resource contract)
 ```
 
 ## Build
 
-### One-time setup (mujoco_interface)
+### One-time setup (mujoco_sim_core)
 
 ```bash
-cd ../mujoco_interface
-ln -sf /opt/mujoco-3.3.6 mujoco
-./scripts/fetch_ecal.sh
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build
+cd ../mujoco_sim_core
+colcon build --packages-up-to mujoco_sim_server --cmake-args -DBUILD_TESTING=ON
+source install/setup.bash
 ```
 
 ### Controller + tests (this repo)
 
 ```bash
 cd wbr_mujoco
-cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake -B build -DCMAKE_BUILD_TYPE=Release \
+  -DMUJOCO_SIM_INSTALL_DIR=../mujoco_sim_core/install
 cmake --build build
 ```
 
-`cmake` looks for `../mujoco_interface` by default. Override if needed:
+`cmake` looks for `../mujoco_sim_core/install` and `../mujoco_interface/third_party/ecal/usr` by default. Override if needed:
 
 ```bash
-cmake -B build -DMUJOCO_INTERFACE_DIR=/path/to/mujoco_interface
+cmake -B build \
+  -DMUJOCO_SIM_INSTALL_DIR=/path/to/mujoco_sim_core/install \
+  -DECAL_ROOT=/path/to/ecal/usr
 ```
 
-This links `ctrl` against `mujoco_interface_core` and also builds the sim server under `build/mujoco_interface/bin/`.  
-You can use that binary or the one from a standalone `mujoco_interface/build/` — they are the same target.
+`ctrl` links `mujoco_sim::adapter_sdk` and runs as a Tick/Commit adapter. Keyboard input arrives on the `operator_input` topic published by the server GUI.
 
 ## Run
 
-Two terminals, **sim first**:
+Two terminals. Build and source `mujoco_sim_core/install` in both. For eCAL config (`ecal.yaml`) and time-sync plugins, also:
 
 ```bash
-# Terminal 1 — simulation server (from mujoco_interface build)
-../mujoco_interface/build/bin/mujoco_interface \
-  -c config/robots/wbr.yaml
+source scripts/env.sh   # sets ECAL_DATA, LD_LIBRARY_PATH, PATH
+```
 
-# Terminal 2 — controller (from wbr_mujoco build)
+```bash
+# Terminal 1 — simulation server (from wbr_mujoco, or mujoco_sim_core install on PATH)
+source scripts/env.sh
+mujoco-sim-server --config config/robots/wbr_server.yaml
+
+# Terminal 2 — controller adapter
+source scripts/env.sh
 ./build/ctrl -c config/robots/wbr.yaml
 ```
 
-Or use the sim binary produced by wbr_mujoco’s integrated build:
+Headless server (no viewer, use `input_script` / e2e config for scripted keys):
 
 ```bash
-./build/mujoco_interface/bin/mujoco_interface -c config/robots/wbr.yaml
-./build/ctrl -c config/robots/wbr.yaml
+mujoco-sim-server --config config/robots/wbr_server.yaml --headless
+./build/ctrl -c config/robots/wbr_e2e.yaml
 ```
 
-Headless (no viewer): add `--headless` to the sim command.  
-Focus the sim window for keyboard input. YAML `ipc_prefix` sets the eCAL topic namespace (default `wbr`).
+Or run the bundled smoke script (requires built `mujoco-sim-server` and `ctrl`):
 
+```bash
+./scripts/e2e_headless.sh
+```
+
+Focus the sim window for live keyboard input. YAML `adapter.server_name` (legacy `ipc_prefix`) must match the server `server_name`.
+
+## Architecture
+
+- **Server** owns MuJoCo, publishes Tick observations and `operator_input` (GUI only).
+- **ctrl** uses `SyncAdapterClient` for register/activate/Tick/Commit and `OperatorInputClient` for keyboard, with `input_script` fallback when operator input is stale.

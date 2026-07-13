@@ -1,5 +1,7 @@
 #include "controller/config.hpp"
 
+#include "controller/sim/config.hpp"
+
 #include <yaml-cpp/yaml.h>
 
 #include <cstdio>
@@ -176,15 +178,112 @@ void parse_pid_config(const YAML::Node& pid_node, control::chassis_config& chass
     }
 }
 
+control::input_snapshot_t parse_input_snapshot(const YAML::Node& node)
+{
+    control::input_snapshot_t input{};
+    if (!node)
+    {
+        return input;
+    }
+    if (node["w"])
+    {
+        input.w = node["w"].as<bool>();
+    }
+    if (node["s"])
+    {
+        input.s = node["s"].as<bool>();
+    }
+    if (node["a"])
+    {
+        input.a = node["a"].as<bool>();
+    }
+    if (node["d"])
+    {
+        input.d = node["d"].as<bool>();
+    }
+    if (node["q"])
+    {
+        input.q = node["q"].as<bool>();
+    }
+    if (node["e"])
+    {
+        input.e = node["e"].as<bool>();
+    }
+    if (node["f"])
+    {
+        input.f = node["f"].as<bool>();
+    }
+    if (node["r"])
+    {
+        input.r = node["r"].as<bool>();
+    }
+    if (node["space"])
+    {
+        input.space = node["space"].as<bool>();
+    }
+    return input;
+}
+
+void parse_interfaces(const YAML::Node& node, sim::InterfaceConfig& interfaces)
+{
+    if (!node)
+    {
+        return;
+    }
+    if (node["imu"])
+    {
+        const YAML::Node imu = node["imu"];
+        if (imu["quaternion"])
+        {
+            interfaces.imu.quaternion = imu["quaternion"].as<std::string>();
+        }
+        if (imu["angular_velocity"])
+        {
+            interfaces.imu.angular_velocity = imu["angular_velocity"].as<std::string>();
+        }
+        if (imu["linear_acceleration"])
+        {
+            interfaces.imu.linear_acceleration = imu["linear_acceleration"].as<std::string>();
+        }
+    }
+    if (node["motors"] && node["motors"].IsSequence())
+    {
+        for (std::size_t i = 0; i < interfaces.motors.size() && i < node["motors"].size(); ++i)
+        {
+            const YAML::Node motor = node["motors"][i];
+            auto& out = interfaces.motors[i];
+            if (motor["semantic_name"])
+            {
+                out.semantic_name = motor["semantic_name"].as<std::string>();
+            }
+            if (motor["position_state"])
+            {
+                out.position_state = motor["position_state"].as<std::string>();
+            }
+            if (motor["velocity_state"])
+            {
+                out.velocity_state = motor["velocity_state"].as<std::string>();
+            }
+            if (motor["effort_state"])
+            {
+                out.effort_state = motor["effort_state"].as<std::string>();
+            }
+            if (motor["effort_command"])
+            {
+                out.effort_command = motor["effort_command"].as<std::string>();
+            }
+        }
+    }
+}
+
 void parse_args(int argc, char** argv, app_config& cfg)
 {
     for (int i = 1; i < argc; ++i)
     {
         if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0)
         {
-            std::printf("Usage: %s [-c PATH] [--ipc-prefix NAME] [--imu-mode bypass|mahony]\n"
-                        "       [--gyro-noise STD] [--accel-noise STD] [--lever-arm-x VAL]\n"
-                        "       [--log-hz HZ] [--no-log]\n",
+            std::printf("Usage: %s [-c PATH] [--server-name NAME] [--controller-id ID]\n"
+                        "       [--imu-mode bypass|mahony] [--log-hz HZ] [--no-log]\n",
                         argv[0]);
             std::exit(0);
         }
@@ -195,24 +294,22 @@ void parse_args(int argc, char** argv, app_config& cfg)
         else if (std::strcmp(argv[i], "--ipc-prefix") == 0 && i + 1 < argc)
         {
             cfg.ipc_prefix = argv[++i];
+            cfg.adapter.server_name = cfg.ipc_prefix;
+        }
+        else if (std::strcmp(argv[i], "--server-name") == 0 && i + 1 < argc)
+        {
+            cfg.adapter.server_name = argv[++i];
+            cfg.ipc_prefix = cfg.adapter.server_name;
+        }
+        else if (std::strcmp(argv[i], "--controller-id") == 0 && i + 1 < argc)
+        {
+            cfg.adapter.controller_id = argv[++i];
         }
         else if (std::strcmp(argv[i], "--imu-mode") == 0 && i + 1 < argc)
         {
             const char* mode = argv[++i];
-            cfg.imu_mode =
+            cfg.pipeline.imu_mode =
                 std::strcmp(mode, "bypass") == 0 ? control::imu_mode::bypass : control::imu_mode::mahony;
-        }
-        else if (std::strcmp(argv[i], "--gyro-noise") == 0 && i + 1 < argc)
-        {
-            cfg.imu_sim.gyro_noise_std = std::strtof(argv[++i], nullptr);
-        }
-        else if (std::strcmp(argv[i], "--accel-noise") == 0 && i + 1 < argc)
-        {
-            cfg.imu_sim.accel_noise_std = std::strtof(argv[++i], nullptr);
-        }
-        else if (std::strcmp(argv[i], "--lever-arm-x") == 0 && i + 1 < argc)
-        {
-            cfg.imu_sim.lever_arm_x = std::strtof(argv[++i], nullptr);
         }
         else if (std::strcmp(argv[i], "--log-hz") == 0 && i + 1 < argc)
         {
@@ -234,38 +331,95 @@ bool load_yaml(const std::string& path, app_config& cfg, std::string& error)
         if (root["ipc_prefix"])
         {
             cfg.ipc_prefix = root["ipc_prefix"].as<std::string>();
+            cfg.adapter.server_name = cfg.ipc_prefix;
         }
 
-        if (root["timestep"] && root["control"] && root["control"]["decimation"])
+        if (root["adapter"])
         {
-            const float timestep = root["timestep"].as<float>();
-            const int decimation = root["control"]["decimation"].as<int>();
-            if (timestep > 0.0f && decimation > 0)
+            const YAML::Node adapter = root["adapter"];
+            if (adapter["server_name"])
             {
-                cfg.control_hz = 1.0f / (timestep * static_cast<float>(decimation));
+                cfg.adapter.server_name = adapter["server_name"].as<std::string>();
+                cfg.ipc_prefix = cfg.adapter.server_name;
             }
+            if (adapter["controller_id"])
+            {
+                cfg.adapter.controller_id = adapter["controller_id"].as<std::string>();
+            }
+            if (adapter["timeout_ms"])
+            {
+                cfg.adapter.timeout_ms = adapter["timeout_ms"].as<std::uint32_t>();
+            }
+            if (adapter["service_timeout_ms"])
+            {
+                cfg.adapter.service_timeout_ms = adapter["service_timeout_ms"].as<std::uint32_t>();
+            }
+            if (adapter["max_ticks"])
+            {
+                cfg.adapter.max_ticks = adapter["max_ticks"].as<std::uint64_t>();
+            }
+            if (adapter["operator_input_max_age_ms"])
+            {
+                cfg.adapter.operator_input_max_age_ms =
+                    adapter["operator_input_max_age_ms"].as<std::uint32_t>();
+            }
+        }
+
+        if (root["interfaces"])
+        {
+            parse_interfaces(root["interfaces"], cfg.adapter.interfaces);
+        }
+
+        if (root["input_script"] && root["input_script"].IsSequence())
+        {
+            std::vector<sim::InputInterval> intervals;
+            for (const auto& item : root["input_script"])
+            {
+                sim::InputInterval interval{};
+                if (item["begin_tick"])
+                {
+                    interval.begin_tick = item["begin_tick"].as<std::uint64_t>();
+                }
+                if (item["end_tick"])
+                {
+                    interval.end_tick = item["end_tick"].as<std::uint64_t>();
+                }
+                interval.input = parse_input_snapshot(item);
+                intervals.push_back(interval);
+            }
+            cfg.input_script = sim::InputScript(std::move(intervals));
+        }
+
+        cfg.pipeline.chassis.control_dt = sim::kControlDtSeconds;
+
+        const YAML::Node pipeline_node = root["pipeline"];
+        if (pipeline_node && pipeline_node["imu_mode"])
+        {
+            const std::string mode = pipeline_node["imu_mode"].as<std::string>();
+            cfg.pipeline.imu_mode =
+                mode == "bypass" ? control::imu_mode::bypass : control::imu_mode::mahony;
         }
 
         const YAML::Node control_node = root["control"];
         if (control_node && control_node["force_relax"])
         {
-            cfg.chassis.force_relax = control_node["force_relax"].as<bool>();
+            cfg.pipeline.chassis.force_relax = control_node["force_relax"].as<bool>();
         }
         if (control_node && control_node["motor_zero_rad"] && control_node["motor_zero_rad"].IsSequence())
         {
             const YAML::Node z = control_node["motor_zero_rad"];
             for (std::size_t i = 0; i < 6 && i < z.size(); ++i)
             {
-                cfg.chassis.motor_zero_rad[i] = z[i].as<float>();
+                cfg.pipeline.chassis.motor_zero_rad[i] = z[i].as<float>();
             }
         }
         if (control_node && control_node["pid"])
         {
-            parse_pid_config(control_node["pid"], cfg.chassis);
+            parse_pid_config(control_node["pid"], cfg.pipeline.chassis);
         }
         if (control_node && control_node["fsm"])
         {
-            parse_fsm_guards(control_node["fsm"], cfg.chassis.fsm);
+            parse_fsm_guards(control_node["fsm"], cfg.pipeline.chassis.fsm);
         }
 
         const YAML::Node log_node = root["logger"];
@@ -281,6 +435,11 @@ bool load_yaml(const std::string& path, app_config& cfg, std::string& error)
                 cfg.logger.stdout_block =
                     mode == "block" || mode == "true" || mode == "on" || mode == "1";
             }
+        }
+
+        if (root["log_every_ticks"])
+        {
+            cfg.log_every_ticks = root["log_every_ticks"].as<std::uint64_t>();
         }
 
         return true;
