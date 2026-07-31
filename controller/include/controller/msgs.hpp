@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-namespace control
+namespace controller
 {
 
 enum class chassis_state : std::uint8_t
@@ -65,6 +65,7 @@ struct msg_motor_cmd_t
 struct msg_pendulum_t
 {
     float x = 0.0f;
+    bool planar_valid = false;
 };
 
 struct msg_odometry_t
@@ -93,6 +94,11 @@ struct input_snapshot_t
     bool e = false;
     bool space = false;
     bool f = false;
+};
+
+struct sim_reset_t
+{
+    std::uint32_t epoch = 0;
 };
 
 struct msg_log_t
@@ -164,4 +170,4 @@ struct msg_log_t
     bool cmd_move = false;
 };
 
-}  // namespace control
+}  // namespace controller

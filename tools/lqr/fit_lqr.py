@@ -9,7 +9,7 @@ Examples:
     # Print C++ arrays
     python3 tools/lqr/fit_lqr.py
 
-    # Write controller/include/control/lqr_coeffs.hpp
+    # Write controller/include/controller/lqr_coeffs.hpp
     python3 tools/lqr/fit_lqr.py --write
 
     # Scale existing header without refitting (numpy only)
@@ -33,7 +33,7 @@ from leg_data import LEG_DATA, L_VALS, R_L, R_W
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
-DEFAULT_HEADER = REPO / "controller" / "include" / "control" / "lqr_coeffs.hpp"
+DEFAULT_HEADER = REPO / "controller" / "include" / "controller" / "lqr_coeffs.hpp"
 
 # Edit Q/R here. State order:
 # Q: [s, ds, yaw, dyaw, alpha_l, dalpha_l, alpha_r, dalpha_r, pitch, dpitch]
@@ -134,14 +134,14 @@ def format_array(name: str, coeffs: np.ndarray, q_diag: list[float], r_diag: lis
 def write_header(path: Path, coeffs: dict[str, np.ndarray]) -> None:
     body = [
         "#pragma once",
-        "namespace control {",
+        "namespace controller {",
         "enum class lqr_mode { low, high, spin };",
         "",
     ]
     for key in ("low", "high", "spin"):
         body.append(format_array(ARRAY_MAP[key], coeffs[key], LQR_WEIGHTS[key]["Q"], LQR_WEIGHTS[key]["R"]))
         body.append("")
-    body.append("} // namespace control")
+    body.append("} // namespace controller")
     body.append("")
     path.write_text("\n".join(body))
 
@@ -150,7 +150,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Fit LQR polynomial gains for wbr_mujoco")
     parser.add_argument("--scale", type=float, default=None, help="Scale coeffs from --from-header")
     parser.add_argument("--from-header", type=Path, default=DEFAULT_HEADER)
-    parser.add_argument("--write", action="store_true", help="Update controller/include/control/lqr_coeffs.hpp")
+    parser.add_argument("--write", action="store_true", help="Update controller/include/controller/lqr_coeffs.hpp")
     args = parser.parse_args()
 
     if args.scale is not None:

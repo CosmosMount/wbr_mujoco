@@ -1,26 +1,14 @@
-#pragma once
+#include "controller/balance.hpp"
 
-#include "control/config.hpp"
-#include "control/lqr_coeffs.hpp"
-#include "control/math.hpp"
-#include "control/msgs.hpp"
-#include "control/leg.hpp"
-
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
-namespace control
+namespace controller
 {
 
-class lqr_solver
+void lqr_solver::update(float llen, float rlen, const float ref_x[10], const float obs_x[10], const chassis_config& cfg)
 {
-public:
-    float tout[4] = {};
-
-    lqr_mode mode = lqr_mode::low;
-
-    void update(float llen, float rlen, const float ref_x[10], const float obs_x[10], const chassis_config& cfg)
-    {
         llen = clamp(llen, cfg.lmin, cfg.lmax);
         rlen = clamp(rlen, cfg.lmin, cfg.lmax);
         llen = std::round(llen * 100.0f) / 100.0f;
@@ -64,25 +52,18 @@ public:
         tout[2] = clamp(tout[2], -cfg.thip_max, cfg.thip_max);
         tout[3] = clamp(tout[3], -cfg.thip_max, cfg.thip_max);
     }
-};
 
-class odometry
+void odometry::reset()
 {
-public:
-    float x = 0.0f;
-    float v = 0.0f;
-    float az = 0.0f;
-
-    void reset()
-    {
         x = 0.0f;
         v = 0.0f;
+        az = 0.0f;
         std::memset(x_hat_, 0, sizeof(x_hat_));
         std::memcpy(p_, p_init_, sizeof(p_));
     }
 
-    void update(const float quaternion[4], const float acc[3], float vel_meas, float yaw, float dt)
-    {
+void odometry::update(const float quaternion[4], const float acc[3], float vel_meas, float yaw, float dt)
+{
         float a_body[3] = {acc[0], acc[1], acc[2]};
         float a_world[3] = {};
         quat_rotate_vec(quaternion, a_body, a_world);
@@ -199,30 +180,13 @@ public:
         v = x_hat_[1];
     }
 
-private:
-    static constexpr float k_max_forward_accel = 12.0f;
-    static constexpr float k_max_velocity_innovation = 1.5f;
-    static constexpr float k_max_accel_innovation = 15.0f;
-
-    float x_hat_[3] = {};
-    float p_[9] = {10, 0, 0, 0, 10, 0, 0, 0, 10};
-    float p_init_[9] = {10, 0, 0, 0, 10, 0, 0, 0, 10};
-    float q_[9] = {0.00025f, 0.00125f, 0.005f, 0.00125f, 0.005f, 0.05f, 0.005f, 0.05f, 0.5f};
-    float r_[4] = {0.1f, 0.0f, 0.0f, 50.0f};
-};
-
-class command_fusion
+void command_fusion::reset(const chassis_config& cfg)
 {
-public:
-    void reset(const chassis_config& cfg)
-    {
         msg_ = {};
         msg_.len = cfg.lmin;
         move_enabled_ = false;
         space_prev_ = false;
         space_armed_ = false;
-        vel_slope_.set_default(0.0f);
-        vel_slope_.set_path(0.006f);
         yaw_slope_.set_default(0.0f);
         yaw_slope_.set_path(0.006f);
         len_target_ = cfg.lmin;
@@ -230,22 +194,23 @@ public:
         yaw_active_prev_ = false;
     }
 
-    void update(const input_snapshot_t& input, const msg_pendulum_t& pendulum, const msg_ins_t& ins,
+void command_fusion::update(const input_snapshot_t& input, const msg_pendulum_t& pendulum, const msg_ins_t& ins,
                 const chassis_config& cfg, float dt)
-    {
+{
+        const float max_velocity = std::fabs(cfg.max_cmd_velocity);
         if (input.w && !input.s)
         {
-            vel_slope_.update_val(vel_slope_.value() + 0.0006f);
+            msg_.v = max_velocity;
         }
         else if (input.s && !input.w)
         {
-            vel_slope_.update_val(vel_slope_.value() - 0.0006f);
+            msg_.v = -max_velocity;
         }
         else
         {
-            vel_slope_.update_val(0.0f);
+            msg_.v = 0.0f;
         }
-        vel_slope_.set_default(clamp(vel_slope_.value(), -k_cmd_velocity_limit, k_cmd_velocity_limit));
+        msg_.v = clamp(msg_.v, -max_velocity, max_velocity);
 
         const bool yaw_active = input.a != input.d;
         if (!yaw_ref_initialized_)
@@ -270,6 +235,8 @@ public:
                 msg_.yaw = ins.total_yaw;
             }
         }
+        const float max_yaw_rate = std::fabs(cfg.max_cmd_yaw_rate);
+        yaw_slope_.set_default(clamp(yaw_slope_.value(), -max_yaw_rate, max_yaw_rate));
         if (input.q)
         {
             len_target_ = cfg.lmin;
@@ -297,14 +264,12 @@ public:
         space_prev_ = input.space;
 
         msg_.move = move_enabled_;
-        msg_.v = vel_slope_.value();
         msg_.dyaw = yaw_slope_.value();
         msg_.len = len_target_;
 
-        if (std::fabs(msg_.v) < 1e-4f)
+        if (!pendulum.planar_valid)
         {
-            const float err = pendulum.x - msg_.x;
-            msg_.x += clamp(err, -k_cmd_position_hold_step, k_cmd_position_hold_step);
+            msg_.x = pendulum.x;
         }
         else
         {
@@ -318,21 +283,7 @@ public:
         yaw_active_prev_ = yaw_active;
     }
 
-    const msg_cmd_t& msg() const { return msg_; }
+const msg_cmd_t& command_fusion::msg() const
+{ return msg_; }
 
-private:
-    static constexpr float k_cmd_velocity_limit = 0.8f;
-    static constexpr float k_cmd_position_hold_step = 0.00025f;
-
-    msg_cmd_t msg_{};
-    bool move_enabled_ = false;
-    bool space_prev_ = false;
-    bool space_armed_ = false;
-    bool yaw_ref_initialized_ = false;
-    bool yaw_active_prev_ = false;
-    slope vel_slope_{0.0f, 0.006f};
-    slope yaw_slope_{0.0f, 0.006f};
-    float len_target_ = 0.16f;
-};
-
-}  // namespace control
+}  // namespace controller

@@ -71,6 +71,7 @@ topic* create()
     static topic_entry<Payload> storage;
     static topic handle;
 
+    std::lock_guard<std::mutex> guard(storage.lock);
     if (!storage.created)
     {
         storage.payload_size = sizeof(Payload);

@@ -29,7 +29,7 @@ Edit `LQR_WEIGHTS` in `fit_lqr.py` (`low` / `high` / `spin` each have `Q` and `R
 - **Softer**: lower `Q` on alpha/pitch, higher `R` on wheel/hip torques
 - **Stiffer**: raise `Q` or lower `R`
 
-Output polynomial matches `lqr_solver` in `controller/include/control/balance.hpp`:
+Output polynomial matches `lqr_solver` in `controller/include/controller/balance.hpp`:
 
 `a1 + a2*L + a3*R + a4*L² + a5*L*R + a6*R²`
 

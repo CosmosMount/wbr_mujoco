@@ -1,5 +1,5 @@
 #pragma once
-namespace control {
+namespace controller {
 enum class lqr_mode { low, high, spin };
 
 constexpr float k_lqr_low[40][6] =
@@ -140,4 +140,4 @@ constexpr float k_lqr_spin[40][6] =
     { 16.270250 , -15.697360, 64.509176, 22.448392, -17.155950, -62.119980},
 };
 
-} // namespace control
+} // namespace controller

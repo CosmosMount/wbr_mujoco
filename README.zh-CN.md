@@ -10,8 +10,9 @@ WBR RoboMaster 平衡轮腿控制器、MuJoCo 机器人模型、运行配置和�
 ## 目录
 
 ```text
-controller/              WBR 控制器应用、eCAL I/O、控制代码
-common/                  小型进程内消息工具
+controller/              WBR 控制算法模块
+runtime/                 WBR 运行时应用、eCAL I/O、services
+msgs/                    小型进程内消息工具
 config/robots/wbr.yaml   simulator 和 controller 共用的 WBR 运行配置
 mjcf/                    WBR scene、model、mesh 资源
 tools/                   mesh 修复与 LQR 拟合工具
@@ -49,7 +50,7 @@ build/ctrl
 ```
 
 `wbr_mujoco` 不编译、不 vendored simulator；它只消费安装包中的
-`mujoco_interface::mujoco_interface_core`。
+`mujoco_interface::core`。
 
 ## 运行
 
@@ -82,15 +83,20 @@ simulator 和 controller 必须使用同一份 YAML，或至少使用匹配的 `
 ```yaml
 ipc_prefix: wbr
 timestep: 0.001
+sensors:
+  imu: true
+  keyboard: true
 ```
+
+下面的键盘控制依赖 `keyboard` sensor interface；它会让 `mujoco_interface` 发布
+本 controller 消费的 viewer input topic。
 
 默认 timestep 为 1 kHz。`mujoco_interface` 默认输出 realtime-rate 指标；
 正常 headless 运行时 `total_real_time_rate` 应接近 1.0。
 
 ## 键位说明
 
-使用键盘控制前，请先让 simulator 窗口获得焦点。controller 从 `mujoco_interface`
-读取键盘状态快照。
+使用键盘控制前，请先让 simulator 窗口获得焦点。controller 从 `mujoco_interface` 读取键盘状态快照。
 
 | 键位 | 功能 |
 | --- | --- |
@@ -166,7 +172,7 @@ python3 tools/fix_stl_for_mujoco.py --dir mjcf/meshes --no-backup
 拟合轮腿平衡控制器的多项式 LQR 增益，可更新：
 
 ```text
-controller/include/control/lqr_coeffs.hpp
+controller/include/controller/lqr_coeffs.hpp
 ```
 
 用法：

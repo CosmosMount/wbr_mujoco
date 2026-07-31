@@ -41,17 +41,24 @@ set(MUJOCO_INTERFACE_CORE_LIB "" CACHE FILEPATH
 set(MUJOCO_DIR "" CACHE PATH "MuJoCo root for legacy fallback")
 set(ECAL_ROOT "" CACHE PATH "eCAL prefix for legacy fallback")
 set(ECAL_LIB_DIR "")
+set(_MUJOCO_INTERFACE_INCLUDE_DIRS "")
 
 if(WBR_USE_MUJOCO_INTERFACE_PACKAGE AND NOT WBR_EMBED_MUJOCO_INTERFACE)
   find_package(mujoco_interface CONFIG QUIET)
 endif()
 
-# --- common (in-proc msg bus only) ---
-add_library(msg common/src/msg.cpp)
-target_include_directories(msg PUBLIC common/include)
+# --- msgs (in-proc msg bus only) ---
+add_library(msg msgs/src/msg.cpp)
+target_include_directories(msg PUBLIC msgs/include)
 
-add_library(control_core INTERFACE)
-target_include_directories(control_core INTERFACE controller/include)
+# --- controller (control algorithms) ---
+add_library(controller_core
+  controller/src/balance.cpp
+  controller/src/chassis_fsm.cpp
+  controller/src/imu_fusion.cpp
+  controller/src/leg.cpp
+)
+target_include_directories(controller_core PUBLIC controller/include)
 
 # --- mujoco_interface ---
 enable_testing()
@@ -62,6 +69,14 @@ if(WBR_EMBED_MUJOCO_INTERFACE)
   endif()
   add_subdirectory(${MUJOCO_INTERFACE_DIR} ${CMAKE_BINARY_DIR}/mujoco_interface)
   add_custom_target(all_sim DEPENDS mujoco_interface)
+elseif(TARGET mujoco_interface::core)
+  add_library(mujoco_interface_core ALIAS mujoco_interface::core)
+  if(DEFINED MUJOCO_INTERFACE_ECAL_LIB_DIR)
+    set(ECAL_LIB_DIR "${MUJOCO_INTERFACE_ECAL_LIB_DIR}")
+  endif()
+  if(DEFINED MUJOCO_INTERFACE_MUJOCO_DIR)
+    set(MUJOCO_DIR "${MUJOCO_INTERFACE_MUJOCO_DIR}")
+  endif()
 elseif(TARGET mujoco_interface::mujoco_interface_core)
   add_library(mujoco_interface_core ALIAS mujoco_interface::mujoco_interface_core)
   if(DEFINED MUJOCO_INTERFACE_ECAL_LIB_DIR)
@@ -85,8 +100,13 @@ else()
         "  ${MUJOCO_INTERFACE_DIR}")
     endif()
     if(NOT MUJOCO_INTERFACE_INCLUDE_DIR)
-      set(MUJOCO_INTERFACE_INCLUDE_DIR "${MUJOCO_INTERFACE_DIR}/include" CACHE PATH
-          "Path to mujoco_interface include directory for legacy fallback" FORCE)
+      if(EXISTS "${MUJOCO_INTERFACE_DIR}/mujoco_interface/robot/include/types.hpp")
+        set(MUJOCO_INTERFACE_INCLUDE_DIR "${MUJOCO_INTERFACE_DIR}/mujoco_interface" CACHE PATH
+            "Path to mujoco_interface module root for legacy fallback" FORCE)
+      else()
+        set(MUJOCO_INTERFACE_INCLUDE_DIR "${MUJOCO_INTERFACE_DIR}/include" CACHE PATH
+            "Path to mujoco_interface include directory for legacy fallback" FORCE)
+      endif()
     endif()
     if(NOT MUJOCO_INTERFACE_BUILD_DIR)
       set(MUJOCO_INTERFACE_BUILD_DIR "${MUJOCO_INTERFACE_DIR}/build" CACHE PATH
@@ -106,6 +126,19 @@ else()
       "Fallback: pass -DMUJOCO_INTERFACE_DIR=/path/to/mujoco_interface or\n"
       "          -DMUJOCO_INTERFACE_INCLUDE_DIR=/path/to/include")
   endif()
+
+  if(EXISTS "${MUJOCO_INTERFACE_INCLUDE_DIR}/robot/include/types.hpp")
+    list(APPEND _MUJOCO_INTERFACE_INCLUDE_DIRS
+      "${MUJOCO_INTERFACE_INCLUDE_DIR}/runtime/include"
+      "${MUJOCO_INTERFACE_INCLUDE_DIR}/robot/include"
+      "${MUJOCO_INTERFACE_INCLUDE_DIR}/protocol/include"
+      "${MUJOCO_INTERFACE_INCLUDE_DIR}/transport/include"
+      "${MUJOCO_INTERFACE_INCLUDE_DIR}/input/include"
+      "${MUJOCO_INTERFACE_INCLUDE_DIR}/sim/include")
+  else()
+    list(APPEND _MUJOCO_INTERFACE_INCLUDE_DIRS "${MUJOCO_INTERFACE_INCLUDE_DIR}")
+  endif()
+
   set(ECAL_LIB_DIR "${ECAL_ROOT}/lib/x86_64-linux-gnu")
   if(NOT MUJOCO_INTERFACE_CORE_LIB AND MUJOCO_INTERFACE_BUILD_DIR)
     set(MUJOCO_INTERFACE_CORE_LIB
@@ -121,7 +154,8 @@ else()
       "  cmake --build /path/to/mujoco_interface/build -j\n"
       "Or configure with -DWBR_EMBED_MUJOCO_INTERFACE=ON for the old integrated build.")
   endif()
-  if(NOT EXISTS "${MUJOCO_INTERFACE_INCLUDE_DIR}/mujoco_interface")
+  if(NOT EXISTS "${MUJOCO_INTERFACE_INCLUDE_DIR}/mujoco_interface" AND
+     NOT EXISTS "${MUJOCO_INTERFACE_INCLUDE_DIR}/robot/include/types.hpp")
     message(FATAL_ERROR "mujoco_interface headers not found at ${MUJOCO_INTERFACE_INCLUDE_DIR}")
   endif()
   if(NOT EXISTS "${MUJOCO_DIR}/include/mujoco/mujoco.h")
@@ -144,23 +178,23 @@ else()
   set_target_properties(mujoco_interface_core PROPERTIES
     IMPORTED_LOCATION "${MUJOCO_INTERFACE_CORE_LIB}"
     INTERFACE_INCLUDE_DIRECTORIES
-      "${MUJOCO_INTERFACE_INCLUDE_DIR};${MUJOCO_DIR}/include;${ECAL_ROOT}/include"
+      "${_MUJOCO_INTERFACE_INCLUDE_DIRS};${MUJOCO_DIR}/include;${ECAL_ROOT}/include"
     INTERFACE_LINK_LIBRARIES
       "yaml-cpp::yaml-cpp;Threads::Threads;glfw;ecal_core;${MUJOCO_DIR}/lib/libmujoco.so"
   )
 endif()
 
-# --- controller ---
+# --- runtime ---
 add_executable(ctrl
-  controller/src/main.cpp
-  controller/src/app.cpp
-  controller/src/services.cpp
-  controller/src/config.cpp
-  controller/src/ecal_io.cpp
+  runtime/src/main.cpp
+  runtime/src/app.cpp
+  runtime/src/services.cpp
+  runtime/src/config.cpp
+  runtime/src/ecal_io.cpp
 )
-target_include_directories(ctrl PRIVATE controller/include)
+target_include_directories(ctrl PRIVATE runtime/include)
 target_link_libraries(ctrl PRIVATE
-  control_core
+  controller_core
   msg
   mujoco_interface_core
   yaml-cpp

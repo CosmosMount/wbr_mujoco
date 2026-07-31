@@ -1,11 +1,11 @@
-#include "controller/app.hpp"
-#include "controller/ecal_io.hpp"
+#include "runtime/app.hpp"
+#include "runtime/ecal_io.hpp"
 
 #include <chrono>
 #include <cstdio>
 #include <thread>
 
-namespace controller
+namespace runtime
 {
 
 controller_app::controller_app(const app_config& cfg)
@@ -34,4 +34,4 @@ void controller_app::shutdown()
     running_.store(false);
 }
 
-}  // namespace controller
+}  // namespace runtime

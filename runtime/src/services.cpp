@@ -1,12 +1,12 @@
-#include "controller/services.hpp"
+#include "runtime/services.hpp"
 
-#include "controller/ecal_io.hpp"
+#include "runtime/ecal_io.hpp"
 
-#include "control/balance.hpp"
-#include "control/chassis_fsm.hpp"
-#include "control/imu_fusion.hpp"
-#include "control/leg.hpp"
-#include "control/math.hpp"
+#include "controller/balance.hpp"
+#include "controller/chassis_fsm.hpp"
+#include "controller/imu_fusion.hpp"
+#include "controller/leg.hpp"
+#include "controller/math.hpp"
 
 #include <chrono>
 #include <cerrno>
@@ -21,7 +21,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-namespace controller
+namespace runtime
 {
 
 namespace
@@ -34,9 +34,9 @@ void sleep_until_tick(std::chrono::steady_clock::time_point& next, float hz)
     std::this_thread::sleep_until(next);
 }
 
-void publish_ins(const control::imu_attitude_t* att, const control::msg_raw_state_t& raw)
+void publish_ins(const controller::imu_attitude_t* att, const controller::msg_raw_state_t& raw)
 {
-    control::msg_ins_t ins{};
+    controller::msg_ins_t ins{};
     if (att != nullptr)
     {
         for (int i = 0; i < 4; ++i)
@@ -54,7 +54,7 @@ void publish_ins(const control::imu_attitude_t* att, const control::msg_raw_stat
         {
             ins.quaternion[i] = raw.quat_gt[i];
         }
-        control::quat_to_euler(ins.quaternion, ins.roll, ins.pitch, ins.yaw);
+        controller::quat_to_euler(ins.quaternion, ins.roll, ins.pitch, ins.yaw);
         ins.total_yaw = ins.yaw;
     }
     ins.gyro_r = raw.gyro[0];
@@ -67,7 +67,7 @@ void publish_ins(const control::imu_attitude_t* att, const control::msg_raw_stat
     msg::publish(ins, {false});
 }
 
-void fill_leg_log(control::msg_log_t& log, const control::link_solver& leg, bool left)
+void fill_leg_log(controller::msg_log_t& log, const controller::link_solver& leg, bool left)
 {
     if (left)
     {
@@ -104,13 +104,18 @@ void fill_leg_log(control::msg_log_t& log, const control::link_solver& leg, bool
     log.r_neutral = leg.neutral_ ? 1.0f : 0.0f;
 }
 
-control::msg_log_t make_log(double time, const control::msg_ins_t& ins, const control::msg_raw_state_t& raw,
-                            const control::link_solver& left, const control::link_solver& right,
-                            const control::msg_ctrl_t& ctrl, const control::msg_motor_cmd_t& motor_cmd,
-                            const control::msg_cmd_t& cmd, control::chassis_state fsm, float n_total, float x,
+bool keeps_planar_odometry(controller::chassis_state state)
+{
+    return state == controller::chassis_state::normal;
+}
+
+controller::msg_log_t make_log(double time, const controller::msg_ins_t& ins, const controller::msg_raw_state_t& raw,
+                            const controller::link_solver& left, const controller::link_solver& right,
+                            const controller::msg_ctrl_t& ctrl, const controller::msg_motor_cmd_t& motor_cmd,
+                            const controller::msg_cmd_t& cmd, controller::chassis_state fsm, float n_total, float x,
                             float v, float az)
 {
-    control::msg_log_t log{};
+    controller::msg_log_t log{};
     log.time = time;
     std::memcpy(log.quaternion, ins.quaternion, sizeof(log.quaternion));
     log.roll = ins.roll;
@@ -149,7 +154,7 @@ control::msg_log_t make_log(double time, const control::msg_ins_t& ins, const co
     return log;
 }
 
-void print_state_block(const control::msg_log_t& log)
+void print_state_block(const controller::msg_log_t& log)
 {
     std::printf("[t=%.3f] imu quat=(%.3f %.3f %.3f %.3f) rpy_rad=(%.4f %.4f %.4f) gyro=(%.3f %.3f %.3f) "
                 "accel=(%.3f %.3f %.3f)\n",
@@ -203,6 +208,7 @@ void print_state_block(const control::msg_log_t& log)
 }
 
 constexpr int k_visualizer_port = 2000;
+constexpr int k_visualizer_max_port = 2010;
 
 const char* visualizer_html()
 {
@@ -247,7 +253,7 @@ function draw(g){const c=g.canvas,ctx=g.ctx;resize(c);const w=c.width,h=c.height
  document.getElementById(g.id+'r').innerHTML=g.series.map(([k,l,cl])=>`<span class="tag ${cl}">${l}: ${val(data.at(-1)||{},k).toFixed(4)}</span>`).join('');
 }
 function redraw(){for(const g of groups)draw(g)}
-const es=new EventSource('/events');es.onopen=()=>status.textContent='live on :2000';es.onerror=()=>status.textContent='disconnected';
+const es=new EventSource('/events');es.onopen=()=>status.textContent=`live on :${location.port||80}`;es.onerror=()=>status.textContent='disconnected';
 es.onmessage=e=>{const o=JSON.parse(e.data);data.push(o);while(data.length>N)data.shift();time.textContent=`t=${Number(o.time||0).toFixed(3)} fsm=${o.fsm} move=${o.cmd_move}`;redraw();}
 addEventListener('resize',redraw);
 </script>
@@ -255,7 +261,7 @@ addEventListener('resize',redraw);
 </html>)HTML";
 }
 
-std::string log_to_json(const control::msg_log_t& log)
+std::string log_to_json(const controller::msg_log_t& log)
 {
     char buf[4096];
     std::snprintf(buf, sizeof(buf),
@@ -307,9 +313,10 @@ bool send_text(int fd, const std::string& text)
 }  // namespace
 
 actuator_service::actuator_service(const app_config& cfg, ecal_io& io, std::atomic<bool>& running)
-    : cfg_(cfg), io_(io), running_(running), thread_([this] { loop(); })
+    : cfg_(cfg), io_(io), running_(running)
 {
     io_.update_motor_cmd({});
+    thread_ = std::thread([this] { loop(); });
 }
 
 actuator_service::~actuator_service()
@@ -328,7 +335,14 @@ void actuator_service::loop()
     {
         io_.poll();
 
-        control::msg_motor_cmd_t latest{};
+        controller::sim_reset_t reset{};
+        if (msg::read(sub_reset_, reset) == msg::status::ok)
+        {
+            motor_cmd_ = {};
+            io_.update_motor_cmd(motor_cmd_);
+        }
+
+        controller::msg_motor_cmd_t latest{};
         if (msg::read(sub_motor_cmd_, latest) == msg::status::ok)
         {
             motor_cmd_ = latest;
@@ -340,8 +354,9 @@ void actuator_service::loop()
 }
 
 ins_service::ins_service(const app_config& cfg, ecal_io& io, std::atomic<bool>& running)
-    : cfg_(cfg), io_(io), running_(running), thread_([this] { loop(); })
+    : cfg_(cfg), io_(io), running_(running)
 {
+    thread_ = std::thread([this] { loop(); });
 }
 
 ins_service::~ins_service()
@@ -354,7 +369,7 @@ ins_service::~ins_service()
 
 void ins_service::loop()
 {
-    control::mahony_filter mahony;
+    controller::mahony_filter mahony;
     mahony.reset();
 
     auto next = std::chrono::steady_clock::now();
@@ -362,11 +377,17 @@ void ins_service::loop()
 
     while (running_.load())
     {
-        control::msg_raw_state_t raw{};
+        controller::sim_reset_t reset{};
+        if (msg::read(sub_reset_, reset) == msg::status::ok)
+        {
+            mahony.reset();
+        }
+
+        controller::msg_raw_state_t raw{};
         if (msg::read(sub_raw_state_, raw) == msg::status::ok)
         {
             io_.apply_imu_noise(raw);
-            if (cfg_.imu_mode == control::imu_mode::bypass)
+            if (cfg_.imu_mode == controller::imu_mode::bypass)
             {
                 publish_ins(nullptr, raw);
             }
@@ -382,8 +403,9 @@ void ins_service::loop()
 }
 
 command_service::command_service(const app_config& cfg, std::atomic<bool>& running)
-    : cfg_(cfg), running_(running), thread_([this] { loop(); })
+    : cfg_(cfg), running_(running)
 {
+    thread_ = std::thread([this] { loop(); });
 }
 
 command_service::~command_service()
@@ -396,7 +418,7 @@ command_service::~command_service()
 
 void command_service::loop()
 {
-    control::command_fusion fusion;
+    controller::command_fusion fusion;
     fusion.reset(cfg_.chassis);
 
     auto next = std::chrono::steady_clock::now();
@@ -404,26 +426,42 @@ void command_service::loop()
 
     while (running_.load())
     {
-        control::input_snapshot_t latest{};
+        controller::sim_reset_t reset{};
+        if (msg::read(sub_reset_, reset) == msg::status::ok)
+        {
+            fusion.reset(cfg_.chassis);
+            input_ = {};
+            pendulum_ = {};
+            ins_ = {};
+        }
+
+        controller::input_snapshot_t latest{};
         if (msg::read(sub_input_, latest) == msg::status::ok)
         {
             input_ = latest;
         }
 
-        control::msg_pendulum_t pendulum{};
-        control::msg_ins_t ins{};
-        msg::read(sub_pendulum_, pendulum);
-        msg::read(sub_ins_, ins);
+        controller::msg_pendulum_t pendulum{};
+        if (msg::read(sub_pendulum_, pendulum) == msg::status::ok)
+        {
+            pendulum_ = pendulum;
+        }
+        controller::msg_ins_t ins{};
+        if (msg::read(sub_ins_, ins) == msg::status::ok)
+        {
+            ins_ = ins;
+        }
 
-        fusion.update(input_, pendulum, ins, cfg_.chassis, dt);
+        fusion.update(input_, pendulum_, ins_, cfg_.chassis, dt);
         msg::publish(fusion.msg(), {false});
         sleep_until_tick(next, cfg_.control_hz);
     }
 }
 
 chassis_service::chassis_service(const app_config& cfg, std::atomic<bool>& running)
-    : cfg_(cfg), running_(running), thread_([this] { loop(); })
+    : cfg_(cfg), running_(running)
 {
+    thread_ = std::thread([this] { loop(); });
 }
 
 chassis_service::~chassis_service()
@@ -437,10 +475,10 @@ chassis_service::~chassis_service()
 void chassis_service::loop()
 {
     // Left-view positive: left leg is the reference frame, right leg is mirrored.
-    control::leg_controller left(true, 0, 1, cfg_.chassis);
-    control::leg_controller right(false, 3, 4, cfg_.chassis);
-    control::odometry odom;
-    control::chassis_fsm fsm;
+    controller::leg_controller left(true, 0, 1, cfg_.chassis);
+    controller::leg_controller right(false, 3, 4, cfg_.chassis);
+    controller::odometry odom;
+    controller::chassis_fsm fsm;
     fsm.init(cfg_.chassis);
 
     auto next = std::chrono::steady_clock::now();
@@ -448,9 +486,21 @@ void chassis_service::loop()
 
     while (running_.load())
     {
-        control::msg_raw_state_t raw{};
-        control::msg_ins_t ins{};
-        control::msg_cmd_t cmd{};
+        controller::sim_reset_t reset{};
+        if (msg::read(sub_reset_, reset) == msg::status::ok)
+        {
+            left = controller::leg_controller(true, 0, 1, cfg_.chassis);
+            right = controller::leg_controller(false, 3, 4, cfg_.chassis);
+            odom.reset();
+            fsm.init(cfg_.chassis);
+            msg::publish(controller::msg_motor_cmd_t{}, {true});
+            sleep_until_tick(next, cfg_.control_hz);
+            continue;
+        }
+
+        controller::msg_raw_state_t raw{};
+        controller::msg_ins_t ins{};
+        controller::msg_cmd_t cmd{};
         if (msg::read(sub_raw_state_, raw) != msg::status::ok || msg::read(sub_ins_, ins) != msg::status::ok ||
             msg::read(sub_cmd_, cmd) != msg::status::ok)
         {
@@ -466,6 +516,10 @@ void chassis_service::loop()
         const float vr = raw.motors[5].dq * cfg_.chassis.rwheel * right.wheel_sign();
 
         odom.update(ins.quaternion, ins.accel, (vl + vr) * 0.5f, yaw, dt);
+        if (!keeps_planar_odometry(fsm.state()))
+        {
+            odom.reset();
+        }
         left.link().solve(pitch, dpitch, odom.az, raw.motors[0], raw.motors[1]);
         right.link().solve(pitch, dpitch, odom.az, raw.motors[3], raw.motors[4]);
 
@@ -484,19 +538,20 @@ void chassis_service::loop()
         observed_x[8] = pitch;
         observed_x[9] = dpitch;
 
-        control::msg_odometry_t odom_msg{};
+        controller::msg_odometry_t odom_msg{};
         odom_msg.x = odom.x;
         odom_msg.v = odom.v;
         odom_msg.a_z = odom.az;
         msg::publish(odom_msg, {false});
 
-        control::fsm_inputs fin{ins, cmd, odom_msg, left, right};
+        controller::fsm_inputs fin{ins, cmd, odom_msg, left, right};
         std::memcpy(fin.observed_x, observed_x, sizeof(observed_x));
         fin.n_total = ll.n_ + rl.n_;
         fin.chassis_dead = false;
 
-        control::fsm_outputs fout{};
+        controller::fsm_outputs fout{};
         fsm.step(fin, fout);
+        fout.pendulum.planar_valid = keeps_planar_odometry(fsm.state());
 
         if (!cmd.move || cfg_.chassis.force_relax)
         {
@@ -514,8 +569,9 @@ void chassis_service::loop()
 }
 
 sim_log_service::sim_log_service(const app_config& cfg, std::atomic<bool>& running)
-    : cfg_(cfg), running_(running), thread_([this] { loop(); })
+    : cfg_(cfg), running_(running)
 {
+    thread_ = std::thread([this] { loop(); });
 }
 
 sim_log_service::~sim_log_service()
@@ -536,7 +592,7 @@ void sim_log_service::loop()
 
     while (running_.load())
     {
-        control::msg_log_t log{};
+        controller::msg_log_t log{};
         if (log_every > 0 && msg::read(sub_log_, log) == msg::status::ok && ++log_counter >= log_every)
         {
             log_counter = 0;
@@ -547,8 +603,9 @@ void sim_log_service::loop()
 }
 
 web_visualizer_service::web_visualizer_service(const app_config& cfg, std::atomic<bool>& running)
-    : cfg_(cfg), running_(running), thread_([this] { loop(); })
+    : cfg_(cfg), running_(running)
 {
+    thread_ = std::thread([this] { loop(); });
 }
 
 web_visualizer_service::~web_visualizer_service()
@@ -572,20 +629,34 @@ void web_visualizer_service::loop()
 
     int opt = 1;
     setsockopt(server, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    addr.sin_port = htons(k_visualizer_port);
-
-    if (bind(server, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0 || listen(server, 8) < 0)
+    int port = k_visualizer_port;
+    for (; port <= k_visualizer_max_port; ++port)
     {
-        std::fprintf(stderr, "visualizer: failed to listen on localhost:%d: %s\n", k_visualizer_port,
-                     std::strerror(errno));
+        sockaddr_in addr{};
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = htonl(INADDR_ANY);
+        addr.sin_port = htons(static_cast<std::uint16_t>(port));
+        if (bind(server, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0)
+        {
+            break;
+        }
+        if (errno != EADDRINUSE)
+        {
+            std::fprintf(stderr, "visualizer: failed to bind localhost:%d: %s\n", port, std::strerror(errno));
+            close(server);
+            return;
+        }
+    }
+
+    if (port > k_visualizer_max_port || listen(server, 8) < 0)
+    {
+        std::fprintf(stderr, "visualizer: failed to listen on localhost:%d-%d: %s\n", k_visualizer_port,
+                     k_visualizer_max_port, std::strerror(errno));
         close(server);
         return;
     }
     set_nonblocking(server);
-    std::printf("visualizer: http://localhost:%d\n", k_visualizer_port);
+    std::printf("visualizer: http://localhost:%d\n", port);
 
     std::vector<int> clients;
     auto next = std::chrono::steady_clock::now();
@@ -637,7 +708,7 @@ void web_visualizer_service::loop()
             }
         }
 
-        control::msg_log_t log{};
+        controller::msg_log_t log{};
         if (msg::read(sub_log_, log) == msg::status::ok && ++publish_divider >= 20)
         {
             publish_divider = 0;
@@ -666,4 +737,4 @@ void web_visualizer_service::loop()
     close(server);
 }
 
-}  // namespace controller
+}  // namespace runtime

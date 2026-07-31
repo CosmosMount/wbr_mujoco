@@ -1,48 +1,20 @@
-#pragma once
+#include "controller/chassis_fsm.hpp"
 
-#include "control/balance.hpp"
-#include "control/config.hpp"
-#include "control/leg.hpp"
-#include "control/math.hpp"
-#include "control/msgs.hpp"
-
+#include <algorithm>
 #include <cmath>
-#include <cstdint>
+#include <cstring>
 
-namespace control
+namespace controller
 {
 
-struct fsm_inputs
+void chassis_fsm::init(const chassis_config& cfg)
 {
-    const msg_ins_t& ins;
-    const msg_cmd_t& cmd;
-    const msg_odometry_t& odom;
-    leg_controller& left;
-    leg_controller& right;
-    float observed_x[10] = {};
-    float n_total = 0.0f;
-    bool chassis_dead = false;
-};
-
-struct fsm_outputs
-{
-    msg_ctrl_t ctrl{};
-    msg_pendulum_t pendulum{};
-    msg_motor_cmd_t motor{};
-    chassis_state next_state{};
-};
-
-class chassis_fsm
-{
-public:
-    void init(const chassis_config& cfg)
-    {
         cfg_ = cfg;
         reset();
     }
 
-    void reset()
-    {
+void chassis_fsm::reset()
+{
         state_ = chassis_state::relax;
         air_protect_cnt_ = 0;
         flipover_cnt_ = 0;
@@ -58,10 +30,11 @@ public:
         std::memset(ref_x_, 0, sizeof(ref_x_));
     }
 
-    chassis_state state() const { return state_; }
+chassis_state chassis_fsm::state() const
+{ return state_; }
 
-    void step(const fsm_inputs& in, fsm_outputs& out)
-    {
+void chassis_fsm::step(const fsm_inputs& in, fsm_outputs& out)
+{
         const auto& ll = in.left.link();
         const auto& rl = in.right.link();
 
@@ -137,10 +110,9 @@ public:
         out.next_state = state_;
     }
 
-private:
-    void step_relax(const fsm_inputs& in, fsm_outputs& out, float pitch, float fl[2], float fr[2], float& twl,
+void chassis_fsm::step_relax(const fsm_inputs& in, fsm_outputs& out, float pitch, float fl[2], float fr[2], float& twl,
                     float& twr)
-    {
+{
         in.left.relax();
         in.right.relax();
         in.left.delta_init_ = false;
@@ -158,8 +130,8 @@ private:
         twr = 0.0f;
     }
 
-    void step_recover(const fsm_inputs& in, float pitch, float fl[2], float fr[2], float& twl, float& twr)
-    {
+void chassis_fsm::step_recover(const fsm_inputs& in, float pitch, float fl[2], float fr[2], float& twl, float& twr)
+{
         auto& l = in.left;
         auto& r = in.right;
         const bool upright = in.ins.accel[2] > 5.0f;
@@ -197,8 +169,8 @@ private:
         twr = 0.0f;
     }
 
-    void step_flatten(const fsm_inputs& in, fsm_outputs& out, float fl[2], float fr[2], float& twl, float& twr)
-    {
+void chassis_fsm::step_flatten(const fsm_inputs& in, fsm_outputs& out, float fl[2], float fr[2], float& twl, float& twr)
+{
         auto& l = in.left;
         auto& r = in.right;
 
@@ -243,8 +215,8 @@ private:
         }
     }
 
-    void step_neutral(const fsm_inputs& in, float fl[2], float fr[2], float& twl, float& twr)
-    {
+void chassis_fsm::step_neutral(const fsm_inputs& in, float fl[2], float fr[2], float& twl, float& twr)
+{
         auto& l = in.left;
         auto& r = in.right;
         const auto& ll = l.link();
@@ -282,9 +254,9 @@ private:
         }
     }
 
-    void step_normal(const fsm_inputs& in, fsm_outputs& out, float pitch, float fl[2], float fr[2], float& twl,
+void chassis_fsm::step_normal(const fsm_inputs& in, fsm_outputs& out, float pitch, float fl[2], float fr[2], float& twl,
                      float& twr)
-    {
+{
         auto& l = in.left;
         auto& r = in.right;
         const auto& ll = l.link();
@@ -362,8 +334,8 @@ private:
         (void)pitch;
     }
 
-    void step_offground(const fsm_inputs& in, float pitch, float fl[2], float fr[2], float& twl, float& twr)
-    {
+void chassis_fsm::step_offground(const fsm_inputs& in, float pitch, float fl[2], float fr[2], float& twl, float& twr)
+{
         auto& l = in.left;
         auto& r = in.right;
         const auto& ll = l.link();
@@ -417,8 +389,8 @@ private:
         }
     }
 
-    void step_spin(const fsm_inputs& in, float fl[2], float fr[2], float& twl, float& twr)
-    {
+void chassis_fsm::step_spin(const fsm_inputs& in, float fl[2], float fr[2], float& twl, float& twr)
+{
         auto& l = in.left;
         auto& r = in.right;
         const auto& ll = l.link();
@@ -460,20 +432,4 @@ private:
         r.tune_len_pd(lb.kp, lb.ki, lb.kd);
     }
 
-    chassis_config cfg_ = k_default_chassis;
-    chassis_state state_ = chassis_state::relax;
-    lqr_solver lqr_;
-    pid roll_pd_{k_default_chassis.fsm_pid.roll};
-    slope len_slope_{0.16f, 0.0002f};
-    float ref_x_[10] = {};
-    float target_len_ = 0.16f;
-    std::uint32_t air_protect_cnt_ = 0;
-    std::uint32_t flipover_cnt_ = 0;
-    std::uint32_t landing_cnt_ = 0;
-    std::uint32_t normal_enter_cnt_ = 0;
-    std::uint32_t normal_exit_cnt_ = 0;
-    bool flying_ = false;
-    bool going_stair_ = false;
-};
-
-}  // namespace control
+}  // namespace controller

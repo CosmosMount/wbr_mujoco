@@ -10,8 +10,9 @@ the WBR-specific controller, YAML config, MJCF scene, meshes, and tuning tools.
 ## Layout
 
 ```text
-controller/              WBR controller app, eCAL I/O, control code
-common/                  small in-process message utilities
+controller/              WBR control algorithms
+runtime/                 WBR runtime app, eCAL I/O, services
+msgs/                    small in-process message utilities
 config/robots/wbr.yaml   WBR runtime config for simulator and controller
 mjcf/                    WBR scene, model, and mesh assets
 tools/                   mesh repair and LQR fitting utilities
@@ -49,7 +50,7 @@ build/ctrl
 ```
 
 `wbr_mujoco` does not build or vendor the simulator. It consumes
-`mujoco_interface::mujoco_interface_core` from the installed package.
+`mujoco_interface::core` from the installed package.
 
 ## Run
 
@@ -82,7 +83,14 @@ The simulator and controller must use the same YAML config, or at least matching
 ```yaml
 ipc_prefix: wbr
 timestep: 0.001
+sensors:
+  imu: true
+  keyboard: true
 ```
+
+The `keyboard` sensor interface must stay enabled for the keyboard controls
+below; it tells `mujoco_interface` to publish the viewer input topic consumed by
+this controller.
 
 The default timestep is 1 kHz. `mujoco_interface` prints realtime-rate metrics by
 default; a healthy headless run should report `total_real_time_rate` close to
@@ -170,7 +178,7 @@ python3 tools/fix_stl_for_mujoco.py --dir mjcf/meshes --no-backup
 Fits polynomial LQR gains for the wheel-leg balance controller and can update:
 
 ```text
-controller/include/control/lqr_coeffs.hpp
+controller/include/controller/lqr_coeffs.hpp
 ```
 
 Usage:

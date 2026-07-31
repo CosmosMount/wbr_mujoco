@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace control
+namespace controller
 {
 
 inline constexpr float k_pi = 3.14159265358979f;
@@ -51,4 +51,4 @@ inline void quat_to_euler(const float q[4], float& roll, float& pitch, float& ya
     yaw = std::atan2(2.0f * (q[0] * q[3] + q[1] * q[2]), q[0] * q[0] + q[1] * q[1] - q[2] * q[2] - q[3] * q[3]);
 }
 
-}  // namespace control
+}  // namespace controller

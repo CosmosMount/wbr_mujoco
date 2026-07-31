@@ -1,5 +1,5 @@
-#include "controller/app.hpp"
-#include "controller/config.hpp"
+#include "runtime/app.hpp"
+#include "runtime/config.hpp"
 
 #include "msg/msg.hpp"
 
@@ -9,7 +9,7 @@
 namespace
 {
 
-controller::controller_app* g_app = nullptr;
+runtime::controller_app* g_app = nullptr;
 
 void handle_signal(int)
 {
@@ -23,7 +23,7 @@ void handle_signal(int)
 
 int main(int argc, char** argv)
 {
-    const controller::app_config cfg = controller::load_config(argc, argv);
+    const runtime::app_config cfg = runtime::load_config(argc, argv);
 
     if (msg::init() != msg::status::ok)
     {
@@ -31,7 +31,7 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    controller::controller_app app(cfg);
+    runtime::controller_app app(cfg);
     g_app = &app;
 
     std::signal(SIGINT, handle_signal);

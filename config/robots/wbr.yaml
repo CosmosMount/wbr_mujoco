@@ -10,6 +10,12 @@ imu:
   gyro: imu_gyro
   accel: imu_accel
 
+sensors:
+  imu: true
+  lidar: false
+  camera: false
+  keyboard: true
+
 motors:
   - name: ljoint1
     actuator: ljoint1_actuator
@@ -50,6 +56,9 @@ motors:
 control:
   decimation: 1
   force_relax: false
+  command:
+    max_velocity: 0.8
+    max_yaw_rate: 1.5
   # motor mechanical zero offsets (rad):
   # [ljoint1, ljoint4, lwheel, rjoint1, rjoint4, rwheel]
   motor_zero_rad: [-0.06, -0.20, 0, 0.06, 0.20, 0]
@@ -74,6 +83,6 @@ control:
     offground_min_air_ticks: 800
 
 logger:
-  # stdout: block prints IMU + motors + link_solver (angles in rad)
-  hz: 1
-  stdout: block
+  # Set stdout: block to print IMU + motors + link_solver (angles in rad)
+  hz: 0
+  stdout: off

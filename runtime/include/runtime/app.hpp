@@ -1,12 +1,12 @@
 #pragma once
 
-#include "controller/config.hpp"
-#include "controller/services.hpp"
+#include "runtime/config.hpp"
+#include "runtime/services.hpp"
 
 #include <atomic>
 #include <memory>
 
-namespace controller
+namespace runtime
 {
 
 class ecal_io;
@@ -31,4 +31,4 @@ private:
     web_visualizer_service visualizer_;
 };
 
-}  // namespace controller
+}  // namespace runtime

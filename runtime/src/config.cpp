@@ -1,4 +1,4 @@
-#include "controller/config.hpp"
+#include "runtime/config.hpp"
 
 #include <yaml-cpp/yaml.h>
 
@@ -7,7 +7,7 @@
 #include <cstring>
 #include <fstream>
 
-namespace controller
+namespace runtime
 {
 
 namespace
@@ -44,12 +44,12 @@ std::string find_config_path(int argc, char** argv)
     return "config/robots/wbr.yaml";
 }
 
-control::pid_mode parse_pid_mode(const std::string& mode)
+controller::pid_mode parse_pid_mode(const std::string& mode)
 {
-    return mode == "dvel" ? control::pid_mode::dvel : control::pid_mode::position;
+    return mode == "dvel" ? controller::pid_mode::dvel : controller::pid_mode::position;
 }
 
-void parse_pid_params(const YAML::Node& node, control::pid_params& params)
+void parse_pid_params(const YAML::Node& node, controller::pid_params& params)
 {
     if (!node)
     {
@@ -81,7 +81,7 @@ void parse_pid_params(const YAML::Node& node, control::pid_params& params)
     }
 }
 
-void parse_phi_state_pid(const YAML::Node& node, control::phi_state_pid& params)
+void parse_phi_state_pid(const YAML::Node& node, controller::phi_state_pid& params)
 {
     if (!node)
     {
@@ -101,7 +101,7 @@ void parse_phi_state_pid(const YAML::Node& node, control::phi_state_pid& params)
     }
 }
 
-void parse_fsm_guards(const YAML::Node& node, control::fsm_guards& guards)
+void parse_fsm_guards(const YAML::Node& node, controller::fsm_guards& guards)
 {
     if (!node)
     {
@@ -129,7 +129,23 @@ void parse_fsm_guards(const YAML::Node& node, control::fsm_guards& guards)
     }
 }
 
-void parse_pid_config(const YAML::Node& pid_node, control::chassis_config& chassis)
+void parse_command_config(const YAML::Node& node, controller::chassis_config& chassis)
+{
+    if (!node)
+    {
+        return;
+    }
+    if (node["max_velocity"])
+    {
+        chassis.max_cmd_velocity = node["max_velocity"].as<float>();
+    }
+    if (node["max_yaw_rate"])
+    {
+        chassis.max_cmd_yaw_rate = node["max_yaw_rate"].as<float>();
+    }
+}
+
+void parse_pid_config(const YAML::Node& pid_node, controller::chassis_config& chassis)
 {
     if (!pid_node)
     {
@@ -200,7 +216,7 @@ void parse_args(int argc, char** argv, app_config& cfg)
         {
             const char* mode = argv[++i];
             cfg.imu_mode =
-                std::strcmp(mode, "bypass") == 0 ? control::imu_mode::bypass : control::imu_mode::mahony;
+                std::strcmp(mode, "bypass") == 0 ? controller::imu_mode::bypass : controller::imu_mode::mahony;
         }
         else if (std::strcmp(argv[i], "--gyro-noise") == 0 && i + 1 < argc)
         {
@@ -267,6 +283,10 @@ bool load_yaml(const std::string& path, app_config& cfg, std::string& error)
         {
             parse_fsm_guards(control_node["fsm"], cfg.chassis.fsm);
         }
+        if (control_node && control_node["command"])
+        {
+            parse_command_config(control_node["command"], cfg.chassis);
+        }
 
         const YAML::Node log_node = root["logger"];
         if (log_node)
@@ -320,4 +340,4 @@ app_config load_config(int argc, char** argv)
     return cfg;
 }
 
-}  // namespace controller
+}  // namespace runtime

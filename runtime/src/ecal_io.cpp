@@ -1,10 +1,20 @@
-#include "controller/ecal_io.hpp"
+#include "runtime/ecal_io.hpp"
 
 #include "msg/msg.hpp"
 
+#if __has_include("mujoco_interface/messages.hpp")
+#include "mujoco_interface/messages.hpp"
+#include "mujoco_interface/ecal.hpp"
+#include "mujoco_interface/types.hpp"
+#elif __has_include("messages.hpp")
+#include "messages.hpp"
+#include "ecal.hpp"
+#include "types.hpp"
+#else
 #include "mujoco_interface/protocol/messages.hpp"
 #include "mujoco_interface/transport/ecal.hpp"
 #include "mujoco_interface/types.hpp"
+#endif
 
 #include <algorithm>
 #include <array>
@@ -14,15 +24,15 @@
 #include <mutex>
 #include <random>
 
-namespace controller
+namespace runtime
 {
 
 namespace
 {
 
-control::msg_raw_state_t to_raw_state(const mujoco_interface::protocol::state_envelope& envelope)
+controller::msg_raw_state_t to_raw_state(const mujoco_interface::protocol::state_envelope& envelope)
 {
-    control::msg_raw_state_t raw{};
+    controller::msg_raw_state_t raw{};
     const auto& state = envelope.body;
     raw.time = state.time;
     for (int i = 0; i < 3; ++i)
@@ -43,9 +53,9 @@ control::msg_raw_state_t to_raw_state(const mujoco_interface::protocol::state_en
     return raw;
 }
 
-control::input_snapshot_t to_input_snapshot(const mujoco_interface::protocol::input_message& input)
+controller::input_snapshot_t to_input_snapshot(const mujoco_interface::protocol::input_message& input)
 {
-    control::input_snapshot_t snap{};
+    controller::input_snapshot_t snap{};
     snap.w = input.w;
     snap.s = input.s;
     snap.a = input.a;
@@ -72,7 +82,7 @@ struct ecal_io::impl
     std::mutex motor_mutex;
     std::mutex tick_mutex;
     std::condition_variable tick_cv;
-    control::msg_motor_cmd_t motor_cmd{};
+    controller::msg_motor_cmd_t motor_cmd{};
     mujoco_interface::protocol::tick_message latest_tick{};
     std::chrono::steady_clock::time_point latest_tick_received{};
     bool has_pending_tick = false;
@@ -106,8 +116,26 @@ ecal_io::ecal_io(const app_config& cfg) : impl_(std::make_unique<impl>(cfg))
                 return;
             }
 
+            const std::uint32_t previous_epoch = impl_->ack_epoch;
             impl_->num_motors = ack.num_motors > 0 ? ack.num_motors : 6;
             impl_->ack_epoch = ack.sync.epoch;
+            if (previous_epoch != 0 && previous_epoch != impl_->ack_epoch)
+            {
+                {
+                    const std::lock_guard<std::mutex> tick_lock(impl_->tick_mutex);
+                    impl_->has_pending_tick = false;
+                    impl_->last_sent_tick_id = 0;
+                    impl_->latest_tick = {};
+                    impl_->latest_tick_received = {};
+                }
+                impl_->stats_count = 0;
+                impl_->stats_missed_ticks = 0;
+                impl_->stats_sum_tick_to_commit_us = 0.0;
+                impl_->stats_max_tick_to_commit_us = 0.0;
+                impl_->stats_sample_count = 0;
+                impl_->last_stats_print = {};
+                msg::publish(controller::sim_reset_t{impl_->ack_epoch}, {true});
+            }
             const bool first = !impl_->registered.exchange(true);
             if (first)
             {
@@ -134,6 +162,13 @@ ecal_io::ecal_io(const app_config& cfg) : impl_(std::make_unique<impl>(cfg))
             if (impl_->registered.load() && tick.sync.epoch != impl_->ack_epoch)
             {
                 impl_->registered.store(false);
+                {
+                    const std::lock_guard<std::mutex> lock(impl_->tick_mutex);
+                    impl_->has_pending_tick = false;
+                    impl_->last_sent_tick_id = 0;
+                    impl_->latest_tick = {};
+                    impl_->latest_tick_received = {};
+                }
                 try_register();
                 return;
             }
@@ -213,7 +248,7 @@ void ecal_io::flush_pending_commit()
         impl_->has_pending_tick = false;
     }
 
-    control::msg_motor_cmd_t motor{};
+    controller::msg_motor_cmd_t motor{};
     {
         const std::lock_guard<std::mutex> lock(impl_->motor_mutex);
         motor = impl_->motor_cmd;
@@ -300,13 +335,13 @@ void ecal_io::try_register()
     }
 }
 
-void ecal_io::update_motor_cmd(const control::msg_motor_cmd_t& motor)
+void ecal_io::update_motor_cmd(const controller::msg_motor_cmd_t& motor)
 {
     const std::lock_guard<std::mutex> lock(impl_->motor_mutex);
     impl_->motor_cmd = motor;
 }
 
-void ecal_io::apply_imu_noise(control::msg_raw_state_t& raw) const
+void ecal_io::apply_imu_noise(controller::msg_raw_state_t& raw) const
 {
     std::normal_distribution<float> gyro_noise(0.0f, impl_->cfg.imu_sim.gyro_noise_std);
     std::normal_distribution<float> accel_noise(0.0f, impl_->cfg.imu_sim.accel_noise_std);
@@ -330,4 +365,4 @@ void ecal_io::apply_imu_noise(control::msg_raw_state_t& raw) const
     }
 }
 
-}  // namespace controller
+}  // namespace runtime
